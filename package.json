@@ -1,0 +1,13 @@
+{
+  "name": "minigolf-entre-amis",
+  "version": "1.0.0",
+  "description": "Jeu de mini-golf multijoueur en ligne, inspiré de Golf With Your Friends",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "three": "^0.180.0",
+    "ws": "^8.18.0"
+  }
+}

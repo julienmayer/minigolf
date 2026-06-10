@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>⛳ Mini-Golf entre amis</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⛳</text></svg>">
+<link rel="stylesheet" href="/style.css">
+<script type="importmap">
+{ "imports": { "three": "/lib/three/three.module.js" } }
+</script>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div id="ui">
+
+  <!-- ============ MENU PRINCIPAL ============ -->
+  <div id="menu" class="screen panel">
+    <h1>⛳ Mini-Golf <span class="accent">entre amis</span></h1>
+    <p class="subtitle">9 trous, jusqu'à 10 joueurs, en simultané !</p>
+
+    <label for="nameInput">Ton pseudo</label>
+    <input id="nameInput" type="text" maxlength="14" placeholder="Ex : Julien" autocomplete="off">
+
+    <label>Couleur de ta balle</label>
+    <div id="colorRow"></div>
+
+    <div class="menu-actions">
+      <button id="btnCreate" class="btn big primary">Créer une partie</button>
+      <div class="join-row">
+        <input id="joinCode" type="text" maxlength="4" placeholder="CODE" autocomplete="off">
+        <button id="btnJoin" class="btn big">Rejoindre</button>
+      </div>
+    </div>
+    <p id="menuError" class="error hidden"></p>
+  </div>
+
+  <!-- ============ SALON D'ATTENTE ============ -->
+  <div id="lobby" class="screen panel hidden">
+    <h2>Salon d'attente</h2>
+    <p class="subtitle">Partage ce code avec tes amis :</p>
+    <div class="code-row">
+      <span id="lobbyCode">----</span>
+      <button id="btnCopy" class="btn small" title="Copier le lien d'invitation">📋 Copier le lien</button>
+    </div>
+    <ul id="lobbyPlayers"></ul>
+    <button id="btnStart" class="btn big primary hidden">Lancer la partie</button>
+    <p id="lobbyHint" class="subtitle">En attente de l'hôte…</p>
+  </div>
+
+  <!-- ============ HUD EN JEU ============ -->
+  <div id="hud" class="hidden">
+    <div id="topBar">
+      <div id="holeInfo">Trou 1 — Par 2</div>
+      <div id="timer">4:00</div>
+    </div>
+    <div id="sidePlayers"></div>
+    <div id="strokesBox">Coups : 0/8</div>
+    <div id="powerWrap"><div id="powerFill"></div></div>
+    <div id="banner" class="hidden"><div id="bannerText"></div><div id="bannerSub"></div></div>
+    <div id="toasts"></div>
+    <div id="hint">🖱️ clic gauche maintenu + tirer vers le bas : viser et frapper · clic droit : caméra · molette : zoom · Tab : scores</div>
+  </div>
+
+  <!-- ============ SCORES ENTRE TROUS ============ -->
+  <div id="holeEnd" class="screen panel hidden">
+    <h2 id="holeEndTitle">Résultats</h2>
+    <div id="holeEndRows"></div>
+    <p class="subtitle">Trou suivant dans quelques secondes…</p>
+  </div>
+
+  <!-- ============ FIN DE PARTIE ============ -->
+  <div id="gameEnd" class="screen panel hidden">
+    <h2>🏆 Fin de partie !</h2>
+    <div id="podium"></div>
+    <div id="endTable"></div>
+    <button id="btnReplay" class="btn big primary hidden">Rejouer</button>
+    <p id="replayHint" class="subtitle">En attente de l'hôte pour rejouer…</p>
+  </div>
+
+  <!-- ============ TABLEAU DES SCORES (Tab) ============ -->
+  <div id="scoreTable" class="hidden"><div id="scoreGrid"></div></div>
+
+</div>
+
+<script type="module" src="/js/main.js"></script>
+</body>
+</html>
