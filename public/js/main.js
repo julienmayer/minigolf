@@ -4,7 +4,7 @@ import { Game } from './game.js';
 import { Net } from './net.js';
 import * as ui from './ui.js';
 import * as audio from './audio.js';
-import { HOLES, NUM_HOLES } from './courses.js';
+import { HOLES, NUM_HOLES, FAIL_SCORE } from './courses.js';
 
 const canvas = document.getElementById('c');
 const game = new Game(canvas);
@@ -31,6 +31,7 @@ function updateHostFlags() {
 ui.init({
   click: () => audio.click(),
   create: async (name, color) => {
+    ui.setMenuLoading(true);
     try {
       await net.connect();
       net.send({ type: 'create', name, color });
@@ -39,6 +40,7 @@ ui.init({
     }
   },
   join: async (name, color, code) => {
+    ui.setMenuLoading(true);
     try {
       await net.connect();
       net.send({ type: 'join', name, color, code });
@@ -48,6 +50,11 @@ ui.init({
   },
   start: () => net.send({ type: 'start' }),
   replay: () => net.send({ type: 'replay' }),
+  resume: () => game.resume(),
+  quit: () => {
+    net.disconnect();
+    location.replace(location.pathname);
+  },
 });
 
 net.on('joined', (m) => {
@@ -86,7 +93,8 @@ net.on('hole_start', (m) => {
   refreshScoreTable();
 });
 
-net.on('state', (m) => game.setRemoteState(m.id, m.p));
+net.on('state', (m) => game.setRemoteState(m.id, m.p, m.shape));
+net.on('power', (m) => game.remotePower(m.id, m.power, m.targets));
 net.on('stroke', (m) => game.remoteStroke(m.id, m.strokes));
 net.on('holed', (m) => game.remoteHoled(m.id, m.strokes));
 net.on('maxed', (m) => game.remoteMaxed(m.id));
@@ -107,7 +115,7 @@ net.on('hole_end', (m) => {
 
   const rows = lobbyPlayers.map((p) => {
     const res = m.results.find((r) => r.id === p.id);
-    const score = res?.score ?? 9;
+    const score = res?.score ?? FAIL_SCORE;
     const holed = res?.holed ?? false;
     return {
       ...p,

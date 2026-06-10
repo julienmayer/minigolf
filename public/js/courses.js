@@ -7,7 +7,8 @@ import * as THREE from 'three';
 export const BALL_R = 0.18;
 export const HOLE_VISUAL_R = 0.3;
 export const CAPTURE_R = 0.27;
-export const MAX_STROKES = 8;
+export const MAX_STROKES = 12;
+export const FAIL_SCORE = 14;
 export const HOLE_SPACING = 46;
 export const GROUND_Y = -1.6;
 
@@ -356,7 +357,7 @@ export function buildCourse(scene) {
         case 'floor': {
           const center = new THREE.Vector3(el.x + dx, el.y - FLOOR_T / 2, el.z);
           box(group, colliders, center, new THREE.Vector3(el.w, FLOOR_T, el.d), null, el.color ?? FELT, E_FLOOR);
-          rects.push({ x: el.x + dx, z: el.z, w: el.w, d: el.d });
+          rects.push({ x: el.x + dx, y: el.y, z: el.z, w: el.w, d: el.d });
           break;
         }
         case 'wall': {
@@ -394,6 +395,10 @@ export function buildCourse(scene) {
 
     const start = new THREE.Vector3(def.start[0] + dx, def.start[1], def.start[2]);
     const hole = new THREE.Vector3(def.hole[0] + dx, def.hole[1], def.hole[2]);
+    const pickupSpawns = rects
+      .filter(r => r.y != null && r.w >= 2 && r.d >= 2)
+      .slice(0, 3)
+      .map(r => new THREE.Vector3(r.x, r.y + 0.48, r.z));
 
     discAt(group, start.x, start.y + 0.012, start.z, 0.5, 0x2e6b33);
     discAt(group, hole.x, hole.y + 0.013, hole.z, HOLE_VISUAL_R, 0x0a0a0a);
@@ -435,6 +440,7 @@ export function buildCourse(scene) {
       oobSplash: !!def.oobSplash,
       colliders,
       movers,
+      pickupSpawns,
       group,
       center: new THREE.Vector3(cx, 0, cz),
     });

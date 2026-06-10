@@ -1,7 +1,9 @@
 # ⛳ Mini-Golf entre amis
 
 Jeu de mini-golf multijoueur en ligne, inspiré de *Golf With Your Friends*.  
-9 trous, jusqu'à 10 joueurs, chacun joue en simultané sur le même trou.
+9 trous, jusqu'à 10 joueurs, chacun joue en simultané sur le même trou avec collisions entre les balles.
+
+Chaque trou autorise jusqu'à 12 coups. Un joueur qui ne termine pas reçoit 14 points.
 
 ## Lancer en local
 
@@ -21,10 +23,21 @@ Ouvre [http://localhost:3000](http://localhost:3000) dans ton navigateur.
 
 | Action | Contrôle |
 |--------|----------|
-| Viser et frapper | Clic gauche maintenu, tirer vers le bas |
-| Caméra | Clic droit + glisser |
+| Viser, régler la puissance et frapper | Clic gauche maintenu : horizontal pour viser, vertical pour la puissance |
+| Capturer/cacher la souris | Cliquer sur le terrain |
+| Viser et déplacer la caméra | Déplacer la souris |
+| Libérer la souris | `Échap` |
 | Zoom | Molette |
+| Sauter pendant le mouvement | `Espace` |
+| Frein à main | Maintenir `S` |
+| Récupérer un pouvoir aléatoire | Passer sur une boîte lumineuse |
+| Utiliser le pouvoir récupéré | `E` |
+| Recentrer vers le trou | `C` |
+| Replacer au dernier tir (+1 coup) | `R` |
 | Tableau des scores | `Tab` (maintenir ou appuyer) |
+
+Le randomiseur transforme réellement la physique des adversaires : cube lourd et très freinant,
+cône instable sur les rebonds, ou dodécaèdre très rebondissant.
 
 ## Jouer à distance (amis hors de ton réseau)
 

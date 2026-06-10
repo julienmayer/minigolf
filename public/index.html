@@ -34,6 +34,10 @@
       </div>
     </div>
     <p id="menuError" class="error hidden"></p>
+    <div id="menuLoader" class="menu-loader hidden">
+      <span class="spinner"></span>
+      <span>Connexion au salon...</span>
+    </div>
   </div>
 
   <!-- ============ SALON D'ATTENTE ============ -->
@@ -56,11 +60,12 @@
       <div id="timer">4:00</div>
     </div>
     <div id="sidePlayers"></div>
-    <div id="strokesBox">Coups : 0/8</div>
+    <div id="powersBox"></div>
+    <div id="strokesBox">Coups : 0/12</div>
     <div id="powerWrap"><div id="powerFill"></div></div>
     <div id="banner" class="hidden"><div id="bannerText"></div><div id="bannerSub"></div></div>
     <div id="toasts"></div>
-    <div id="hint">🖱️ clic gauche maintenu + tirer vers le bas : viser et frapper · clic droit : caméra · molette : zoom · Tab : scores</div>
+    <div id="hint">🖱️ clic : capturer la souris · mouvement : caméra · gauche : puissance/visée · Échap : libérer · E : pouvoir</div>
   </div>
 
   <!-- ============ SCORES ENTRE TROUS ============ -->
@@ -77,6 +82,23 @@
     <div id="endTable"></div>
     <button id="btnReplay" class="btn big primary hidden">Rejouer</button>
     <p id="replayHint" class="subtitle">En attente de l'hôte pour rejouer…</p>
+  </div>
+
+  <!-- ============ MENU ÉCHAP ============ -->
+  <div id="escapeMenu" class="screen panel pause-panel hidden">
+    <h2>Partie en cours</h2>
+    <p class="subtitle">La partie continue pour les autres joueurs.</p>
+    <div class="pause-controls">
+      <span><b>Souris</b> caméra et visée</span>
+      <span><b>Espace</b> saut</span>
+      <span><b>S</b> frein à main</span>
+      <span><b>E</b> utiliser le pouvoir</span>
+      <span><b>R</b> replacer la balle</span>
+    </div>
+    <div class="menu-actions">
+      <button id="btnResume" class="btn big primary">Reprendre</button>
+      <button id="btnQuit" class="btn big danger">Quitter la partie</button>
+    </div>
   </div>
 
   <!-- ============ TABLEAU DES SCORES (Tab) ============ -->

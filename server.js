@@ -14,7 +14,8 @@ const NUM_HOLES = 9;
 const HOLE_TIME_MS = 240_000;   // 4 min max par trou
 const BETWEEN_MS = 6_500;       // écran des scores entre les trous
 const MAX_PLAYERS = 10;
-const FAIL_SCORE = 9;           // score si le trou n'est pas terminé
+const MAX_STROKES = 12;
+const FAIL_SCORE = 14;
 
 const COLORS = [
   '#e63946', '#457b9d', '#2a9d8f', '#ffb703', '#9b5de5',
@@ -60,6 +61,18 @@ const server = http.createServer((req, res) => {
 
 const wss = new WebSocketServer({ server });
 const rooms = new Map(); // code -> room
+
+function log(event, details = {}) {
+  const fields = Object.entries(details)
+    .filter(([, value]) => value !== undefined && value !== null && value !== '')
+    .map(([key, value]) => `${key}=${JSON.stringify(value)}`)
+    .join(' ');
+  console.log(`[${new Date().toISOString()}] ${event}${fields ? ` ${fields}` : ''}`);
+}
+
+function logPlayer(event, room, p, details = {}) {
+  log(event, { room: room?.code, player: p?.name, id: p?.id, ...details });
+}
 
 function makeCode() {
   const chars = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
@@ -109,11 +122,13 @@ function joinRoom(ws, room, msg) {
     done: false,
     holed: false,
     result: 0,
+    shape: 0,
   };
   room.players.set(id, p);
   ws.meta = { code: room.code, id };
   send(ws, { type: 'joined', code: room.code, id, players: snapshot(room), numHoles: NUM_HOLES });
   broadcast(room, { type: 'player_joined', player: { id, name: p.name, color: p.color, host: p.host } }, id);
+  logPlayer('player.joined', room, p, { host: p.host, players: room.players.size });
 }
 
 function ctx(ws) {
@@ -127,9 +142,10 @@ function startHole(room, i) {
   room.hole = i;
   room.state = 'playing';
   for (const p of room.players.values()) {
-    p.strokes = 0; p.done = false; p.holed = false; p.result = 0;
+    p.strokes = 0; p.done = false; p.holed = false; p.result = 0; p.shape = 0;
   }
   broadcast(room, { type: 'hole_start', hole: i, duration: HOLE_TIME_MS });
+  log('hole.started', { room: room.code, hole: i + 1, players: room.players.size });
   clearTimeout(room.timer);
   room.timer = setTimeout(() => endHole(room), HOLE_TIME_MS + 2000);
 }
@@ -158,6 +174,7 @@ function endHole(room) {
     total: (room.scores.get(p.id) || []).reduce((a, s) => a + (s || 0), 0),
   }));
   broadcast(room, { type: 'hole_end', hole: room.hole, results, totals });
+  log('hole.ended', { room: room.code, hole: room.hole + 1, results });
   room.nextTimer = setTimeout(() => {
     if (!rooms.has(room.code) || room.players.size === 0) return;
     if (room.hole + 1 < NUM_HOLES) {
@@ -169,6 +186,7 @@ function endHole(room) {
         return { id: p.id, scores: arr, total: arr.reduce((a, s) => a + (s || 0), 0) };
       });
       broadcast(room, { type: 'game_end', table });
+      log('game.ended', { room: room.code, table });
     }
   }, BETWEEN_MS);
 }
@@ -179,10 +197,12 @@ function leave(ws) {
   room.players.delete(p.id);
   room.scores.delete(p.id);
   ws.meta = null;
+  logPlayer('player.left', room, p, { players: room.players.size });
   if (room.players.size === 0) {
     clearTimeout(room.timer);
     clearTimeout(room.nextTimer);
     rooms.delete(room.code);
+    log('room.deleted', { room: room.code });
     return;
   }
   broadcast(room, { type: 'player_left', id: p.id });
@@ -190,6 +210,7 @@ function leave(ws) {
     const next = room.players.values().next().value;
     next.host = true;
     broadcast(room, { type: 'host_change', id: next.id });
+    logPlayer('host.changed', room, next);
   }
   checkDone(room);
 }
@@ -203,6 +224,7 @@ function handle(ws, m) {
         code, players: new Map(), state: 'lobby', hole: -1,
         scores: new Map(), timer: null, nextTimer: null, seq: 0,
       });
+      log('room.created', { room: code });
       joinRoom(ws, rooms.get(code), m);
       break;
     }
@@ -218,6 +240,7 @@ function handle(ws, m) {
     case 'start': {
       const { room, p } = ctx(ws);
       if (!room || !p || !p.host || room.state !== 'lobby') return;
+      logPlayer('game.started', room, p, { players: room.players.size });
       startHole(room, 0);
       break;
     }
@@ -225,14 +248,29 @@ function handle(ws, m) {
       const { room, p } = ctx(ws);
       if (!room || !p || room.state !== 'playing') return;
       if (!Array.isArray(m.p) || m.p.length !== 3) return;
-      broadcast(room, { type: 'state', id: p.id, p: m.p }, p.id);
+      broadcast(room, { type: 'state', id: p.id, p: m.p, shape: p.shape }, p.id);
+      break;
+    }
+    case 'power': {
+      const { room, p } = ctx(ws);
+      if (!room || !p || room.state !== 'playing' || p.done) return;
+      if (m.power !== 'randomizer') return;
+      const targets = [...room.players.values()]
+        .filter(target => target.id !== p.id && !target.done)
+        .map(target => {
+          target.shape = 1 + Math.floor(Math.random() * 3);
+          return { id: target.id, shape: target.shape };
+        });
+      broadcast(room, { type: 'power', id: p.id, power: m.power, targets });
+      logPlayer('power.used', room, p, { power: m.power, hole: room.hole + 1, targets });
       break;
     }
     case 'stroke': {
       const { room, p } = ctx(ws);
       if (!room || !p || room.state !== 'playing' || p.done) return;
-      p.strokes = Math.min(p.strokes + 1, 20);
+      p.strokes = Math.min(p.strokes + 1, MAX_STROKES);
       broadcast(room, { type: 'stroke', id: p.id, strokes: p.strokes }, p.id);
+      logPlayer('stroke', room, p, { hole: room.hole + 1, strokes: p.strokes });
       break;
     }
     case 'holed': {
@@ -242,6 +280,7 @@ function handle(ws, m) {
       p.holed = true;
       p.result = Math.max(1, Math.min(FAIL_SCORE, Math.round(Number(m.strokes) || 1)));
       broadcast(room, { type: 'holed', id: p.id, strokes: p.result });
+      logPlayer('player.holed', room, p, { hole: room.hole + 1, strokes: p.result });
       checkDone(room);
       break;
     }
@@ -252,6 +291,7 @@ function handle(ws, m) {
       p.holed = false;
       p.result = FAIL_SCORE;
       broadcast(room, { type: 'maxed', id: p.id }, p.id);
+      logPlayer('player.maxed', room, p, { hole: room.hole + 1, strokes: p.strokes });
       checkDone(room);
       break;
     }
@@ -262,29 +302,45 @@ function handle(ws, m) {
       room.hole = -1;
       room.scores.clear();
       broadcast(room, { type: 'back_to_lobby', players: snapshot(room) });
+      logPlayer('game.replay', room, p);
       break;
     }
   }
 }
 
-wss.on('connection', (ws) => {
+wss.on('connection', (ws, req) => {
   ws.meta = null;
   ws.isAlive = true;
+  ws.remoteAddress = req.socket.remoteAddress;
+  log('socket.connected', { ip: ws.remoteAddress, clients: wss.clients.size });
   ws.on('pong', () => { ws.isAlive = true; });
   ws.on('message', (data) => {
-    if (data.length > 4096) return;
+    if (data.length > 4096) {
+      log('socket.message_rejected', { ip: ws.remoteAddress, reason: 'too_large', bytes: data.length });
+      return;
+    }
     let m;
-    try { m = JSON.parse(data); } catch { return; }
+    try { m = JSON.parse(data); } catch {
+      log('socket.message_rejected', { ip: ws.remoteAddress, reason: 'invalid_json' });
+      return;
+    }
     if (!m || typeof m !== 'object' || typeof m.type !== 'string') return;
     handle(ws, m);
   });
-  ws.on('close', () => leave(ws));
-  ws.on('error', () => {});
+  ws.on('close', (code) => {
+    leave(ws);
+    log('socket.closed', { ip: ws.remoteAddress, code, clients: wss.clients.size });
+  });
+  ws.on('error', (err) => log('socket.error', { ip: ws.remoteAddress, error: err.message }));
 });
 
 setInterval(() => {
   for (const ws of wss.clients) {
-    if (!ws.isAlive) { ws.terminate(); continue; }
+    if (!ws.isAlive) {
+      log('socket.terminated', { ip: ws.remoteAddress, reason: 'heartbeat_timeout' });
+      ws.terminate();
+      continue;
+    }
     ws.isAlive = false;
     ws.ping();
   }

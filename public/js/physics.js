@@ -6,13 +6,13 @@ import * as THREE from 'three';
 import { BALL_R } from './courses.js';
 
 export const GRAVITY = 18;
-export const MAX_SHOT_SPEED = 11;
+export const MAX_SHOT_SPEED = 14;
 const ROLL_DEC = 2.6;        // décélération de roulement (m/s²)
 const DRAG = 0.16;           // frein quadratique
 const AIR_DRAG = 0.05;
 const STOP_SPEED = 0.14;
 const BOUNCE_MIN = 1.5;      // vitesse normale minimale pour rebondir
-const SPEED_CAP = 16;
+const SPEED_CAP = 20;
 
 const _lp = new THREE.Vector3();
 const _cl = new THREE.Vector3();
@@ -25,6 +25,7 @@ export class Ball {
     this.pos = new THREE.Vector3();
     this.vel = new THREE.Vector3();
     this.grounded = false;
+    this.shape = 0;
   }
 }
 
@@ -107,8 +108,14 @@ export function stepBall(ball, colliders, dt, cb) {
       _vrel.copy(ball.vel).sub(_vs);
       const vn = _vrel.dot(out.n);
       if (vn < 0) {
-        const e = vn < -BOUNCE_MIN ? c.e : 0;
+        const bounceMult = ball.shape === 3 ? 1.8 : ball.shape === 1 ? 0.35 : 1;
+        const e = vn < -BOUNCE_MIN ? Math.min(1.15, (c.e ?? 0) * bounceMult) : 0;
         _vrel.addScaledVector(out.n, -(1 + e) * vn);
+        if (ball.shape === 2 && out.n.y < 0.7) {
+          const wobble = Math.sin(ball.pos.x * 19 + ball.pos.z * 23) * Math.min(2.8, -vn * 0.45);
+          _vrel.x += out.n.z * wobble;
+          _vrel.z -= out.n.x * wobble;
+        }
         if (out.isBumper) {
           const vr = _vrel.dot(out.n);
           if (vr < c.bumper.minOut) _vrel.addScaledVector(out.n, c.bumper.minOut - vr);
@@ -127,7 +134,8 @@ export function stepBall(ball, colliders, dt, cb) {
 
   if (ball.grounded) {
     if (sp > 0) {
-      const dec = (ROLL_DEC + DRAG * sp) * dt;
+      const rollMult = ball.shape === 1 ? 2.4 : ball.shape === 2 ? 1.35 : ball.shape === 3 ? 0.55 : 1;
+      const dec = (ROLL_DEC * rollMult + DRAG * sp) * dt;
       ball.vel.multiplyScalar(Math.max(0, 1 - dec / sp));
     }
     if (ball.vel.length() < STOP_SPEED && maxNy > 0.985) ball.vel.set(0, 0, 0);

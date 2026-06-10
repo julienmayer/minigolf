@@ -54,6 +54,8 @@ export function init(cb) {
 
   $('btnStart').addEventListener('click', () => { cb.click(); cb.start(); });
   $('btnReplay').addEventListener('click', () => { cb.click(); cb.replay(); });
+  $('btnResume').addEventListener('click', () => { cb.click(); cb.resume(); });
+  $('btnQuit').addEventListener('click', () => { cb.click(); cb.quit(); });
   $('btnCopy').addEventListener('click', () => {
     const code = $('lobbyCode').textContent;
     const link = `${location.origin}/?code=${code}`;
@@ -66,20 +68,34 @@ export function init(cb) {
 }
 
 export function showMenuError(msg) {
+  setMenuLoading(false);
   const e = $('menuError');
   e.textContent = msg;
   e.classList.remove('hidden');
   setTimeout(() => e.classList.add('hidden'), 4000);
 }
 
+export function setMenuLoading(active) {
+  $('menuLoader').classList.toggle('hidden', !active);
+  $('btnCreate').disabled = active;
+  $('btnJoin').disabled = active;
+  $('nameInput').disabled = active;
+  $('joinCode').disabled = active;
+}
+
 const SCREENS = ['menu', 'lobby', 'holeEnd', 'gameEnd'];
 export function showScreen(name) {
+  if (name !== 'menu') setMenuLoading(false);
   for (const s of SCREENS) $(s).classList.toggle('hidden', s !== name);
   $('hud').classList.toggle('hidden', name !== null);
 }
 export function showHud() {
   for (const s of SCREENS) $(s).classList.add('hidden');
   $('hud').classList.remove('hidden');
+}
+
+export function showEscapeMenu(visible) {
+  $('escapeMenu').classList.toggle('hidden', !visible);
 }
 
 // ---------------------------------------------------------------- salon
@@ -132,6 +148,10 @@ export function setStrokes(n, max) {
 
 export function setPower(p) {
   $('powerFill').style.width = `${Math.round(p * 100)}%`;
+}
+
+export function setPowers(lines) {
+  $('powersBox').innerHTML = lines.join('<br>');
 }
 
 export function updateSidePlayers(players, meId) {

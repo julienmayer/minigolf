@@ -4,10 +4,12 @@ export class Net {
   constructor() {
     this.ws = null;
     this.handlers = new Map();
+    this.intentionalClose = false;
   }
 
   connect() {
     if (this.ws && this.ws.readyState <= 1) return Promise.resolve();
+    this.intentionalClose = false;
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     this.ws = new WebSocket(`${proto}//${location.host}`);
     this.ws.addEventListener('message', (e) => {
@@ -17,6 +19,8 @@ export class Net {
       if (fn) fn(m);
     });
     this.ws.addEventListener('close', () => {
+      this.ws = null;
+      if (this.intentionalClose) return;
       const fn = this.handlers.get('_close');
       if (fn) fn();
     });
@@ -30,5 +34,11 @@ export class Net {
 
   send(obj) {
     if (this.ws && this.ws.readyState === 1) this.ws.send(JSON.stringify(obj));
+  }
+
+  disconnect() {
+    this.intentionalClose = true;
+    if (this.ws && this.ws.readyState <= 1) this.ws.close();
+    this.ws = null;
   }
 }

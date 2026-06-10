@@ -2,7 +2,7 @@
 // balles des autres joueurs (interpolées depuis le réseau).
 
 import * as THREE from 'three';
-import { buildCourse, BALL_R, CAPTURE_R, MAX_STROKES, GROUND_Y } from './courses.js';
+import { buildCourse, BALL_R, CAPTURE_R, MAX_STROKES, FAIL_SCORE, GROUND_Y } from './courses.js';
 import { Ball, stepBall, MAX_SHOT_SPEED } from './physics.js';
 import * as ui from './ui.js';
 import * as audio from './audio.js';
@@ -10,6 +10,13 @@ import * as audio from './audio.js';
 const STEP = 1 / 120;
 const SEND_INTERVAL = 80;       // ms entre deux envois de position
 const MIN_SHOT_SPEED = 1.0;
+const JUMP_SPEED = 5.2;
+const HANDBRAKE_DEC = 14;
+const POWER_LEAP_SPEED = 8.5;
+const POWER_LEAP_UP = 4.5;
+const FREEZE_WINDOW_MS = 3000;
+const FREEZE_BOOST_SPEED = 13;
+const PLAYER_COLLISION_RESTITUTION = 0.85;
 
 export class Game {
   constructor(canvas) {
@@ -22,6 +29,9 @@ export class Game {
 
     this.cam = { yaw: 0, pitch: 0.55, dist: 5.5, target: new THREE.Vector3() };
     this.charge = null;
+    this.handbrake = false;
+    this.inventory = null;
+    this.pickups = [];
     this.intro = { active: false, t: 0 };
 
     this.holeIdx = 0;
@@ -139,6 +149,46 @@ export class Game {
     return m;
   }
 
+  powerGeometry(kind) {
+    if (kind === 1) return new THREE.BoxGeometry(BALL_R * 1.9, BALL_R * 1.9, BALL_R * 1.9);
+    if (kind === 2) return new THREE.ConeGeometry(BALL_R * 1.15, BALL_R * 2.5, 6);
+    if (kind === 3) return new THREE.DodecahedronGeometry(BALL_R * 1.25, 0);
+    return new THREE.SphereGeometry(BALL_R, 24, 18);
+  }
+
+  setPlayerShape(p, shape) {
+    if (!p || ![0, 1, 2, 3].includes(shape) || p.shape === shape) return;
+    p.shape = shape;
+    p.mesh.geometry.dispose();
+    p.mesh.geometry = this.powerGeometry(shape);
+    p.mesh.material.emissive.setHex(shape ? 0x301040 : 0x000000);
+    p.mesh.material.emissiveIntensity = shape ? 0.65 : 0;
+    p.mesh.rotation.set(shape === 2 ? Math.PI / 2 : 0, 0, 0);
+  }
+
+  setupPickups() {
+    for (const p of this.pickups) this.scene.remove(p.mesh);
+    this.pickups = this.cur.pickupSpawns.map((pos, i) => {
+      const mesh = new THREE.Group();
+      const cube = new THREE.Mesh(
+        new THREE.BoxGeometry(0.48, 0.48, 0.48),
+        new THREE.MeshStandardMaterial({
+          color: 0xffd54f, emissive: 0x6b4f00, emissiveIntensity: 0.8,
+          roughness: 0.3, metalness: 0.15,
+        }),
+      );
+      const core = new THREE.Mesh(
+        new THREE.OctahedronGeometry(0.18),
+        new THREE.MeshBasicMaterial({ color: 0xffffff }),
+      );
+      cube.castShadow = true;
+      mesh.add(cube, core);
+      mesh.position.copy(pos);
+      this.scene.add(mesh);
+      return { mesh, active: true, phase: i * 2.1 };
+    });
+  }
+
   makeLabel(name) {
     const cv = document.createElement('canvas');
     cv.width = 256; cv.height = 64;
@@ -175,8 +225,10 @@ export class Game {
       shown: new THREE.Vector3(),
       from: new THREE.Vector3(),
       to: new THREE.Vector3(),
+      velocity: new THREE.Vector3(),
       t0: 0, dur: 90, lastMsg: 0,
       strokes: 0, holedAt: null, failed: false, sink: -1,
+      shape: 0,
     };
     entry.mesh.visible = false;
     if (entry.label) entry.label.visible = false;
@@ -199,11 +251,17 @@ export class Game {
     this.phase = 'play';
     this.timeUp = false;
     this.charge = null;
+    this.handbrake = false;
+    this.inventory = null;
+    ui.showEscapeMenu(false);
     ui.setPower(0);
+    this.refreshPower();
+    this.setupPickups();
 
     const startPos = this.cur.start.clone().add(new THREE.Vector3(0, BALL_R + 0.02, 0));
     this.me.ball.pos.copy(startPos);
     this.me.ball.vel.set(0, 0, 0);
+    this.me.ball.shape = 0;
     this.me.strokes = 0;
     this.me.holed = false;
     this.me.maxed = false;
@@ -216,8 +274,10 @@ export class Game {
       p.shown.copy(startPos);
       p.from.copy(startPos);
       p.to.copy(startPos);
+      p.velocity.set(0, 0, 0);
       p.mesh.visible = true;
       p.mesh.scale.setScalar(1);
+      this.setPlayerShape(p, 0);
       if (p.label) p.label.visible = true;
     }
 
@@ -243,6 +303,8 @@ export class Game {
 
   freezeHole() {
     this.phase = 'between';
+    ui.showEscapeMenu(false);
+    if (document.pointerLockElement === this.canvas) document.exitPointerLock();
     this.me.ball.vel.set(0, 0, 0);
     this.charge = null;
     this.arrow.visible = false;
@@ -251,6 +313,8 @@ export class Game {
 
   gameOver() {
     this.phase = 'end';
+    ui.showEscapeMenu(false);
+    if (document.pointerLockElement === this.canvas) document.exitPointerLock();
     this.charge = null;
     this.arrow.visible = false;
     audio.fanfare();
@@ -258,6 +322,8 @@ export class Game {
 
   backToLobby() {
     this.phase = 'menu';
+    ui.showEscapeMenu(false);
+    if (document.pointerLockElement === this.canvas) document.exitPointerLock();
     for (const p of this.players.values()) {
       p.mesh.visible = false;
       if (p.label) p.label.visible = false;
@@ -285,10 +351,13 @@ export class Game {
     this.net.send({ type: 'state', p: [+p.x.toFixed(3), +p.y.toFixed(3), +p.z.toFixed(3)] });
   }
 
-  setRemoteState(id, arr) {
+  setRemoteState(id, arr, shape = 0) {
     const p = this.players.get(id);
     if (!p || id === this.meId) return;
+    this.setPlayerShape(p, shape);
     const now = performance.now();
+    const elapsed = Math.max(0.04, (now - p.lastMsg) / 1000);
+    p.velocity.set(arr[0], arr[1], arr[2]).sub(p.to).divideScalar(elapsed);
     p.from.copy(p.shown);
     p.to.set(arr[0], arr[1], arr[2]);
     p.dur = Math.min(200, Math.max(40, now - p.lastMsg || 90));
@@ -319,8 +388,17 @@ export class Game {
     const p = this.players.get(id);
     if (!p) return;
     p.failed = true;
+    p.mesh.visible = false;
+    if (p.label) p.label.visible = false;
     ui.toast(`${p.name} n'a pas terminé le trou…`);
     this.refreshSide();
+  }
+
+  remotePower(id, power, targets = []) {
+    if (power !== 'randomizer') return;
+    this.applyRandomizerTargets(targets);
+    const caster = this.players.get(id);
+    if (caster) ui.toast(`${caster.name} a utilisé le randomiseur !`);
   }
 
   // ------------------------------------------------------------- entrées
@@ -337,22 +415,27 @@ export class Game {
     cv.addEventListener('pointerdown', (e) => {
       if (this.phase === 'menu') return;
       audio.unlock();
-      cv.setPointerCapture(e.pointerId);
+      if (this.phase === 'play' && document.pointerLockElement !== cv) {
+        cv.requestPointerLock();
+        ui.showEscapeMenu(false);
+        ui.toast('Souris capturée · Échap pour libérer');
+        return;
+      }
       if (this.intro.active) this.intro.t = 99;
       if (e.button === 0 && this.canShootNow()) {
-        this.charge = { power: 0, maxTicked: false };
-      } else {
-        this.drag = { x: e.clientX, y: e.clientY };
+        this.charge = { pointerId: e.pointerId, power: 0, maxTicked: false };
+      } else if (e.button === 2) {
+        this.drag = { pointerId: e.pointerId };
       }
-      this.lastPointer = { x: e.clientX, y: e.clientY };
     });
 
-    cv.addEventListener('pointermove', (e) => {
-      if (!this.lastPointer) return;
-      const dx = e.clientX - this.lastPointer.x;
-      const dy = e.clientY - this.lastPointer.y;
-      this.lastPointer = { x: e.clientX, y: e.clientY };
-      if (this.charge) {
+    document.addEventListener('mousemove', (e) => {
+      if (document.pointerLockElement !== cv || this.phase !== 'play') return;
+      const dx = e.movementX;
+      const dy = e.movementY;
+
+      // Pendant la charge : horizontal = visee, vertical = puissance.
+      if (this.charge && (e.buttons & 1)) {
         this.cam.yaw -= dx * 0.0028;
         this.charge.power = Math.max(0, Math.min(1, this.charge.power + dy / 270));
         if (this.charge.power >= 1 && !this.charge.maxTicked) {
@@ -361,35 +444,201 @@ export class Game {
         }
         if (this.charge.power < 1) this.charge.maxTicked = false;
         ui.setPower(this.charge.power);
-      } else if (this.drag) {
+      }
+
+      if (this.drag && (e.buttons & 2)) {
         this.cam.yaw -= dx * 0.0055;
-        this.cam.pitch = Math.max(0.12, Math.min(1.32, this.cam.pitch + dy * 0.005));
+        if (!this.charge) {
+          this.cam.pitch = Math.max(0.12, Math.min(1.32, this.cam.pitch + dy * 0.005));
+        }
+      } else if (!this.charge && this.phase !== 'menu') {
+        this.cam.yaw -= dx * 0.0035;
+        this.cam.pitch = Math.max(0.12, Math.min(1.32, this.cam.pitch + dy * 0.003));
       }
     });
 
-    const release = () => {
-      if (this.charge) {
+    const release = (e) => {
+      if (e.button === 0 && this.charge) {
         if (this.charge.power > 0.04 && this.canShootNow()) this.shoot(this.charge.power);
         this.charge = null;
         ui.setPower(0);
       }
-      this.drag = null;
-      this.lastPointer = null;
+      if (e.button === 2) this.drag = null;
     };
-    cv.addEventListener('pointerup', release);
+    document.addEventListener('pointerup', release);
     cv.addEventListener('pointercancel', release);
-    addEventListener('blur', release);
+    document.addEventListener('pointerlockchange', () => {
+      const locked = document.pointerLockElement === cv;
+      if (!locked) {
+        this.charge = null;
+        this.drag = null;
+        ui.setPower(0);
+      }
+      if (this.phase === 'play') ui.showEscapeMenu(!locked);
+    });
+    addEventListener('blur', () => {
+      this.charge = null;
+      this.drag = null;
+      this.handbrake = false;
+      ui.setPower(0);
+    });
 
     cv.addEventListener('wheel', (e) => {
       this.cam.dist = Math.max(2.2, Math.min(14, this.cam.dist * Math.exp(e.deltaY * 0.001)));
     }, { passive: true });
 
     addEventListener('keydown', (e) => {
+      if (e.code === 'Space') {
+        e.preventDefault();
+        if (!e.repeat) this.jump();
+      }
+      if (e.key.toLowerCase() === 's') this.handbrake = true;
+      if (e.key.toLowerCase() === 'e' && !e.repeat) this.usePower();
       if (e.key === 'Escape' && this.charge) {
         this.charge = null;
         ui.setPower(0);
       }
+      if (e.key.toLowerCase() === 'c' && this.phase === 'play') this.aimAtHole();
+      if (e.key.toLowerCase() === 'r') this.resetBall();
     });
+    addEventListener('keyup', (e) => {
+      if (e.key.toLowerCase() === 's') this.handbrake = false;
+    });
+  }
+
+  resume() {
+    if (this.phase !== 'play') return;
+    ui.showEscapeMenu(false);
+    this.canvas.requestPointerLock();
+  }
+
+  jump() {
+    if (this.phase !== 'play' || this.me.holed || this.me.maxed) return;
+    if (!this.me.ball.grounded || this.me.ball.vel.lengthSq() < 0.3) return;
+    this.me.ball.vel.y = JUMP_SPEED;
+    this.me.ball.grounded = false;
+    this.me.atRest = false;
+    this.wasMoving = true;
+    this.sendState(true);
+  }
+
+  usePower() {
+    if (!this.canUsePower() || !this.inventory) return;
+    if (this.inventory.type === 'leap') this.useLeap();
+    else if (this.inventory.type === 'freeze') this.useFreeze();
+    else if (this.inventory.type === 'randomizer') this.useRandomizer();
+  }
+
+  useLeap() {
+    const dir = new THREE.Vector3(-Math.sin(this.cam.yaw), 0, -Math.cos(this.cam.yaw));
+    this.me.ball.vel.addScaledVector(dir, POWER_LEAP_SPEED);
+    this.me.ball.vel.y = Math.max(this.me.ball.vel.y, POWER_LEAP_UP);
+    this.me.ball.grounded = false;
+    this.me.atRest = false;
+    this.wasMoving = true;
+    this.inventory.charges--;
+    ui.toast(`Double bond · ${this.inventory.charges} restant${this.inventory.charges > 1 ? 's' : ''}`);
+    if (this.inventory.charges <= 0) this.inventory = null;
+    this.refreshPower();
+    this.sendState(true);
+  }
+
+  useFreeze() {
+    const now = performance.now();
+    if (!this.inventory.armedUntil) {
+      this.me.ball.vel.set(0, 0, 0);
+      this.me.atRest = true;
+      this.wasMoving = false;
+      this.inventory.armedUntil = now + FREEZE_WINDOW_MS;
+      ui.toast('Glaciation · réutilise E sous 3 secondes');
+    } else if (now <= this.inventory.armedUntil) {
+      const dir = new THREE.Vector3(-Math.sin(this.cam.yaw), 0, -Math.cos(this.cam.yaw));
+      this.me.ball.vel.copy(dir.multiplyScalar(FREEZE_BOOST_SPEED));
+      this.me.ball.vel.y = 1.2;
+      this.me.atRest = false;
+      this.wasMoving = true;
+      this.inventory = null;
+      ui.toast('Propulsion glaciale !');
+      this.sendState(true);
+    }
+    this.refreshPower();
+  }
+
+  useRandomizer() {
+    if (this.net) this.net.send({ type: 'power', power: 'randomizer' });
+    ui.toast('Randomiseur envoyé !');
+    this.inventory = null;
+    this.refreshPower();
+  }
+
+  canUsePower() {
+    return this.phase === 'play' && !this.me.holed && !this.me.maxed && !this.intro.active;
+  }
+
+  applyRandomizerTargets(targets) {
+    const names = { 1: 'cube lourd', 2: 'cône instable', 3: 'dodécaèdre rebondissant' };
+    for (const target of targets) {
+      const p = this.players.get(target.id);
+      if (!p || ![1, 2, 3].includes(target.shape)) continue;
+      this.setPlayerShape(p, target.shape);
+      if (target.id === this.meId) {
+        this.me.ball.shape = target.shape;
+        ui.banner('Randomisé !', names[target.shape], 2200);
+      }
+    }
+  }
+
+  refreshPower() {
+    if (!this.inventory) {
+      ui.setPowers(['Passe sur une boîte pour obtenir un pouvoir']);
+      return;
+    }
+    const names = {
+      leap: `Double bond (${this.inventory.charges}/2)`,
+      freeze: this.inventory.armedUntil ? 'Glaciation · propulsion prête' : 'Glaciation',
+      randomizer: 'Randomiseur',
+    };
+    ui.setPowers([`<b>E</b> ${names[this.inventory.type]}`]);
+  }
+
+  collectPickup(pickup) {
+    if (this.inventory || !pickup.active) return;
+    const types = ['leap', 'freeze', 'randomizer'];
+    const type = types[Math.floor(Math.random() * types.length)];
+    this.inventory = type === 'leap' ? { type, charges: 2 } : { type, armedUntil: 0 };
+    pickup.active = false;
+    pickup.mesh.visible = false;
+    const names = { leap: 'Double bond', freeze: 'Glaciation', randomizer: 'Randomiseur' };
+    ui.toast(`${names[type]} récupéré · utilise E`);
+    this.refreshPower();
+  }
+
+  aimAtHole() {
+    const f = this.cur.hole.clone().sub(this.me.ball.pos).setY(0);
+    if (f.lengthSq() > 1e-6) this.cam.yaw = Math.atan2(-f.x, -f.z);
+    this.cam.pitch = 0.5;
+    this.cam.dist = 5.5;
+  }
+
+  resetBall() {
+    if (this.phase !== 'play' || this.me.holed || this.me.maxed || this.me.strokes === 0) return;
+    this.me.ball.pos.copy(this.me.lastShotPos);
+    this.me.ball.vel.set(0, 0, 0);
+    this.me.atRest = true;
+    this.wasMoving = false;
+    this.charge = null;
+    this.me.strokes++;
+    ui.setPower(0);
+    ui.setStrokes(this.me.strokes, MAX_STROKES);
+    ui.toast('Balle replacée · +1 coup');
+    if (this.net) this.net.send({ type: 'stroke' });
+    this.sendState(true);
+    this.refreshSide();
+    if (this.me.strokes >= MAX_STROKES) {
+      this.me.maxed = true;
+      ui.banner('Limite de coups atteinte', `score : ${FAIL_SCORE}`, 2600);
+      if (this.net) this.net.send({ type: 'maxed' });
+    }
   }
 
   shoot(power) {
@@ -412,10 +661,33 @@ export class Game {
     const me = this.me;
     if (me.holed || me.sink >= 0) return;
 
+    if (this.inventory?.type === 'freeze' && this.inventory.armedUntil
+      && performance.now() > this.inventory.armedUntil) {
+      this.inventory = null;
+      ui.toast('La propulsion glaciale a expiré');
+      this.refreshPower();
+    }
+
     stepBall(me.ball, this.cur.colliders, dt, {
       bounce: (impact) => audio.bounce(impact),
       bumper: () => audio.bumper(),
     });
+    this.resolvePlayerCollisions();
+
+    for (const pickup of this.pickups) {
+      if (pickup.active && me.ball.pos.distanceToSquared(pickup.mesh.position) < 0.55 * 0.55) {
+        this.collectPickup(pickup);
+      }
+    }
+
+    if (this.handbrake && me.ball.grounded) {
+      const horizontalSpeed = Math.hypot(me.ball.vel.x, me.ball.vel.z);
+      if (horizontalSpeed > 0) {
+        const k = Math.max(0, 1 - HANDBRAKE_DEC * dt / horizontalSpeed);
+        me.ball.vel.x *= k;
+        me.ball.vel.z *= k;
+      }
+    }
 
     const h = this.cur.hole;
     const dx = me.ball.pos.x - h.x;
@@ -447,10 +719,11 @@ export class Game {
     if (me.ball.pos.y < this.cur.oobY) {
       me.ball.pos.copy(me.lastShotPos);
       me.ball.vel.set(0, 0, 0);
+      me.ball.grounded = false;
       me.atRest = true;
       this.wasMoving = false;
-      if (this.cur.oobSplash) { audio.splash(); ui.toast('Plouf ! 💦'); }
-      else ui.toast('Hors limites !');
+      if (this.cur.oobSplash) audio.splash();
+      ui.toast('Hors limites · retour à la dernière position stable');
       this.sendState(true);
       return;
     }
@@ -460,10 +733,11 @@ export class Game {
     if (!moving && this.wasMoving) {
       this.wasMoving = false;
       me.atRest = true;
+      me.lastShotPos.copy(me.ball.pos);
       this.sendState(true);
       if (this.phase === 'play' && me.strokes >= MAX_STROKES && !me.holed && !me.maxed) {
         me.maxed = true;
-        ui.banner('Limite de coups atteinte', `score : ${MAX_STROKES + 1}`, 2600);
+        ui.banner('Limite de coups atteinte', `score : ${FAIL_SCORE}`, 2600);
         if (this.net) this.net.send({ type: 'maxed' });
         this.refreshSide();
       }
@@ -471,6 +745,44 @@ export class Game {
       this.wasMoving = true;
       me.atRest = false;
     }
+  }
+
+  resolvePlayerCollisions() {
+    const me = this.me;
+    const diameter = BALL_R * 2;
+    let collided = false;
+
+    for (const p of this.players.values()) {
+      if (p.id === this.meId || p.holedAt != null || p.failed || !p.mesh.visible) continue;
+      const dx = me.ball.pos.x - p.shown.x;
+      const dy = me.ball.pos.y - p.shown.y;
+      const dz = me.ball.pos.z - p.shown.z;
+      const d2 = dx * dx + dy * dy + dz * dz;
+      if (d2 >= diameter * diameter || d2 < 1e-8) continue;
+
+      const d = Math.sqrt(d2);
+      const nx = dx / d, ny = dy / d, nz = dz / d;
+      const penetration = diameter - d;
+      me.ball.pos.x += nx * penetration;
+      me.ball.pos.y += ny * penetration;
+      me.ball.pos.z += nz * penetration;
+
+      const rvx = me.ball.vel.x - p.velocity.x;
+      const rvy = me.ball.vel.y - p.velocity.y;
+      const rvz = me.ball.vel.z - p.velocity.z;
+      const normalSpeed = rvx * nx + rvy * ny + rvz * nz;
+      if (normalSpeed < 0) {
+        const impulse = -(1 + PLAYER_COLLISION_RESTITUTION) * normalSpeed * 0.5;
+        me.ball.vel.x += nx * impulse;
+        me.ball.vel.y += ny * impulse;
+        me.ball.vel.z += nz * impulse;
+        me.atRest = false;
+        this.wasMoving = true;
+        collided = true;
+      }
+    }
+
+    if (collided) this.sendState(true);
   }
 
   loop(now) {
@@ -484,6 +796,11 @@ export class Game {
     for (const c of this.clouds) {
       c.position.x += dt * 0.4;
       if (c.position.x > 440) c.position.x = -30;
+    }
+    for (const p of this.pickups) {
+      if (!p.active) continue;
+      p.mesh.rotation.y += dt * 1.8;
+      p.mesh.position.y += Math.sin(now * 0.003 + p.phase) * dt * 0.12;
     }
 
     if (this.phase === 'play') {
@@ -615,4 +932,5 @@ export class Game {
     this.arrowShaft.material.color.copy(col);
     this.arrowHead.material.color.copy(col);
   }
+
 }
